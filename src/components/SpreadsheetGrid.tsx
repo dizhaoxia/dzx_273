@@ -77,11 +77,11 @@ export function SpreadsheetGrid({
     selectedColRef.current = selectedCol;
   }, [selectedCol, selectedColRef]);
 
-  const [, forceUpdate] = useState(0);
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     if (!cells || !rows || !columns) return;
-    const observer = () => forceUpdate((n) => n + 1);
+    const observer = () => setVersion((v) => v + 1);
     cells.observe(observer);
     rows.observe(observer);
     columns.observe(observer);
@@ -102,7 +102,7 @@ export function SpreadsheetGrid({
       total += columns.get(i).width;
     }
     return total;
-  }, [columns, colCount]);
+  }, [columns, colCount, version]);
 
   const totalHeight = useMemo(() => {
     let total = HEADER_ROW_HEIGHT;
@@ -111,7 +111,7 @@ export function SpreadsheetGrid({
       total += rows.get(i).height;
     }
     return total;
-  }, [rows, rowCount]);
+  }, [rows, rowCount, version]);
 
   const getRowFromY = useCallback(
     (y: number) => {
@@ -125,7 +125,7 @@ export function SpreadsheetGrid({
       }
       return rows.length - 1;
     },
-    [rows]
+    [rows, version]
   );
 
   const getColFromX = useCallback(
@@ -140,7 +140,7 @@ export function SpreadsheetGrid({
       }
       return columns.length - 1;
     },
-    [columns]
+    [columns, version]
   );
 
   const getYForRow = useCallback(
@@ -153,7 +153,7 @@ export function SpreadsheetGrid({
       }
       return y;
     },
-    [rows]
+    [rows, version]
   );
 
   const getXForCol = useCallback(
@@ -166,7 +166,7 @@ export function SpreadsheetGrid({
       }
       return x;
     },
-    [columns]
+    [columns, version]
   );
 
   const scrollContainerWidth = scrollContainerRef.current?.clientWidth || 1200;
@@ -187,7 +187,11 @@ export function SpreadsheetGrid({
   const handleCellClick = (row: number, col: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (isDragging) return;
-    setSelection({ anchor: { row, col }, focus: { row, col } });
+    const newSelection = { anchor: { row, col }, focus: { row, col } };
+    selectionRef.current = newSelection;
+    selectedRowRef.current = null;
+    selectedColRef.current = null;
+    setSelection(newSelection);
     onCursorChange(row, col);
     onSelectRow(null);
     onSelectCol(null);
@@ -201,13 +205,17 @@ export function SpreadsheetGrid({
 
   const handleMouseDown = (row: number, col: number) => {
     setIsDragging(true);
-    setSelection({ anchor: { row, col }, focus: { row, col } });
+    const newSelection = { anchor: { row, col }, focus: { row, col } };
+    selectionRef.current = newSelection;
+    setSelection(newSelection);
     onSelectionChange({ row, col }, { row, col });
   };
 
   const handleMouseEnter = (row: number, col: number) => {
     if (isDragging) {
-      setSelection((prev) => ({ ...prev, focus: { row, col } }));
+      const newSelection = { ...selection, focus: { row, col } };
+      selectionRef.current = newSelection;
+      setSelection(newSelection);
       onSelectionChange(selection.anchor, { row, col });
     }
   };
@@ -230,7 +238,9 @@ export function SpreadsheetGrid({
       setEditingCell({ row, col });
       e.preventDefault();
     } else if (e.key === 'Escape') {
-      setSelection({ anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 } });
+      const newSelection = { anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 } };
+      selectionRef.current = newSelection;
+      setSelection(newSelection);
       e.preventDefault();
     } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       let newRow = row;
@@ -241,10 +251,14 @@ export function SpreadsheetGrid({
       if (e.key === 'ArrowRight') newCol = Math.min(colCount - 1, col + 1);
 
       if (e.shiftKey) {
-        setSelection((prev) => ({ ...prev, focus: { row: newRow, col: newCol } }));
+        const newSelection = { ...selection, focus: { row: newRow, col: newCol } };
+        selectionRef.current = newSelection;
+        setSelection(newSelection);
         onSelectionChange(selection.anchor, { row: newRow, col: newCol });
       } else {
-        setSelection({ anchor: { row: newRow, col: newCol }, focus: { row: newRow, col: newCol } });
+        const newSelection = { anchor: { row: newRow, col: newCol }, focus: { row: newRow, col: newCol } };
+        selectionRef.current = newSelection;
+        setSelection(newSelection);
         onCursorChange(newRow, newCol);
       }
       e.preventDefault();
@@ -278,26 +292,38 @@ export function SpreadsheetGrid({
       nextCol = Math.min(colCount - 1, editingCell!.col + 1);
     }
 
+    const newSelection = { anchor: { row: nextRow, col: nextCol }, focus: { row: nextRow, col: nextCol } };
+    selectionRef.current = newSelection;
     setEditingCell(null);
-    setSelection({ anchor: { row: nextRow, col: nextCol }, focus: { row: nextRow, col: nextCol } });
+    setSelection(newSelection);
     onCursorChange(nextRow, nextCol);
   };
 
   const handleRowHeaderClick = (row: number, e: React.MouseEvent) => {
+    selectedRowRef.current = row;
+    selectedColRef.current = null;
+    const newSelection = { anchor: { row, col: 0 }, focus: { row, col: colCount - 1 } };
+    selectionRef.current = newSelection;
     setSelectedRow(row);
     onSelectRow(row);
     onSelectCol(null);
     setSelectedCol(null);
-    setSelection({ anchor: { row, col: 0 }, focus: { row, col: colCount - 1 } });
+    setSelection(newSelection);
     e.stopPropagation();
   };
 
   const handleColHeaderClick = (col: number, e: React.MouseEvent) => {
+    selectedColRef.current = col;
+    selectedRowRef.current = null;
+    const currentRow = selectionRef.current?.focus.row ?? 0;
+    const newSelection = { anchor: { row: 0, col }, focus: { row: rowCount - 1, col } };
+    selectionRef.current = newSelection;
     setSelectedCol(col);
     onSelectCol(col);
     onSelectRow(null);
     setSelectedRow(null);
-    setSelection({ anchor: { row: 0, col }, focus: { row: rowCount - 1, col } });
+    setSelection(newSelection);
+    onCursorChange(currentRow, col);
     e.stopPropagation();
   };
 

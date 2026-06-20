@@ -19,6 +19,7 @@ export function DocEditor() {
   });
   const selectedRowRef = useRef<number | null>(null);
   const selectedColRef = useRef<number | null>(null);
+  const activeCellRef = useRef({ row: 0, col: 0 });
 
   const collab = useCollaboration(docId || '');
 
@@ -85,6 +86,7 @@ export function DocEditor() {
         selection={selectionRef.current}
         selectedRow={selectedRowRef.current}
         selectedCol={selectedColRef.current}
+        activeCell={activeCellRef.current}
         onUndo={collab.undo}
         onRedo={collab.redo}
         onInsertRowAbove={handleInsertRowAbove}
@@ -106,6 +108,7 @@ export function DocEditor() {
             getCellValue={collab.getCellValue}
             setCellValue={collab.setCellValue}
             onCursorChange={(r, c) => {
+              activeCellRef.current = { row: r, col: c };
               collab.updateCursor(r, c);
               refreshToolbar();
             }}

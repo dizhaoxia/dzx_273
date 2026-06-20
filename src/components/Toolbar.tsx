@@ -10,6 +10,7 @@ interface ToolbarProps {
   selection: Selection | null;
   selectedCol: number | null;
   selectedRow: number | null;
+  activeCell: { row: number; col: number };
   onUndo: () => void;
   onRedo: () => void;
   onInsertRowAbove: (index: number) => void;
@@ -30,6 +31,7 @@ export function Toolbar({
   selection,
   selectedCol,
   selectedRow,
+  activeCell,
   onUndo,
   onRedo,
   onInsertRowAbove,
@@ -41,8 +43,8 @@ export function Toolbar({
   onDeleteCol,
   onToggleColHidden,
 }: ToolbarProps) {
-  const activeRow = selectedRow ?? selection?.focus.row ?? null;
-  const activeCol = selectedCol ?? selection?.focus.col ?? null;
+  const activeRow = selectedRow ?? activeCell.row;
+  const activeCol = selectedCol ?? activeCell.col;
   const hasRowSelection = activeRow !== null;
   const hasColSelection = activeCol !== null;
 
