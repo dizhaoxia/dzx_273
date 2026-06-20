@@ -1,0 +1,110 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* Toast slide-in animation */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutRight {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.toast-enter {
+  animation: slideInRight 0.3s ease-out forwards;
+}
+
+.toast-exit {
+  animation: slideOutRight 0.3s ease-in forwards;
+}
+
+/* Cursor pulse animation */
+@keyframes cursorPulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  50% {
+    opacity: 0.7;
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+.cursor-pulse {
+  animation: cursorPulse 2s ease-in-out infinite;
+}
+
+/* Cell flash animation */
+@keyframes cellFlash {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.cell-flash {
+  animation: cellFlash 1.5s ease-out forwards;
+}
+
+/* AG Grid custom styles */
+.ag-theme-alpine {
+  --ag-header-background-color: #e2e8f0;
+  --ag-header-foreground-color: #0f172a;
+  --ag-odd-row-background-color: #f8fafc;
+  --ag-row-border-color: #e5e7eb;
+  --ag-border-color: #e5e7eb;
+  --ag-font-family: 'JetBrains Mono', monospace;
+  --ag-font-size: 13px;
+  --ag-selected-row-background-color: rgba(59, 130, 246, 0.1);
+  --ag-range-selection-background-color: rgba(59, 130, 246, 0.15);
+  --ag-range-selection-border-color: #3b82f6;
+}
+
+.ag-theme-alpine .ag-header-cell {
+  font-weight: 600;
+}
+
+.ag-theme-alpine .ag-cell {
+  display: flex;
+  align-items: center;
+}
