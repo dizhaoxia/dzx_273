@@ -1,7 +1,11 @@
-import type { CellType } from '../types';
+import type { CellType, CellData } from '../types';
 
 export function detectType(rawValue: string): CellType {
   const trimmed = rawValue.trim();
+
+  if (trimmed.startsWith('=')) {
+    return 'formula';
+  }
 
   if (trimmed === '' || trimmed === null || trimmed === undefined) {
     return 'empty';
@@ -43,6 +47,8 @@ export function parseValue(rawValue: string): string | number | boolean | null {
       return Number(rawValue.trim());
     case 'date':
       return rawValue.trim();
+    case 'formula':
+      return rawValue;
     default:
       return rawValue;
   }
@@ -50,9 +56,20 @@ export function parseValue(rawValue: string): string | number | boolean | null {
 
 export function formatValue(
   value: string | number | boolean | null,
-  type: CellType
+  type: CellType,
+  cellData?: CellData
 ): string {
   if (value === null || value === undefined) return '';
+
+  if (type === 'formula') {
+    if (cellData?.error) {
+      return cellData.error;
+    }
+    if (cellData?.formula && cellData.value !== undefined && cellData.value !== null) {
+      return String(cellData.value);
+    }
+    return String(value);
+  }
 
   switch (type) {
     case 'boolean':
@@ -76,6 +93,8 @@ export function getTypeIcon(type: CellType): string {
       return '📅';
     case 'boolean':
       return '✓';
+    case 'formula':
+      return 'ƒx';
     default:
       return '';
   }

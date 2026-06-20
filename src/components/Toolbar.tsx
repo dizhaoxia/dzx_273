@@ -1,5 +1,26 @@
-import { Undo2, Redo2, Plus, Trash2, Eye, EyeOff, Table2, Share2, ArrowUpFromLine, ArrowDownFromLine, ArrowLeftFromLine, ArrowRightFromLine } from 'lucide-react';
-import type { CollabUser, Selection } from '../types';
+import {
+  Undo2,
+  Redo2,
+  Plus,
+  Trash2,
+  Eye,
+  EyeOff,
+  Table2,
+  Share2,
+  ArrowUpFromLine,
+  ArrowDownFromLine,
+  ArrowLeftFromLine,
+  ArrowRightFromLine,
+  Paintbrush,
+  History,
+  Upload,
+  Download,
+  Bold,
+  Type,
+} from 'lucide-react';
+import { useRef } from 'react';
+import type { CollabUser, Selection, ConditionOperator, ConditionalFormatStyle } from '../types';
+import { createConditionalFormatRule } from '../utils/conditionalFormat';
 import UserAvatarList from './UserAvatarList';
 
 interface ToolbarProps {
@@ -21,6 +42,10 @@ interface ToolbarProps {
   onInsertColRight: (index: number) => void;
   onDeleteCol: (index: number) => void;
   onToggleColHidden: (index: number) => void;
+  onAddConditionalFormat: (rule: any) => void;
+  onOpenVersionHistory: () => void;
+  onImportXlsx: (file: File) => void;
+  onExportXlsx: () => void;
 }
 
 export function Toolbar({
@@ -42,11 +67,49 @@ export function Toolbar({
   onInsertColRight,
   onDeleteCol,
   onToggleColHidden,
+  onAddConditionalFormat,
+  onOpenVersionHistory,
+  onImportXlsx,
+  onExportXlsx,
 }: ToolbarProps) {
   const activeRow = selectedRow ?? activeCell.row;
   const activeCol = selectedCol ?? activeCell.col;
   const hasRowSelection = activeRow !== null;
   const hasColSelection = activeCol !== null;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const getSelectionRange = () => {
+    if (!selection) {
+      const colLetter = String.fromCharCode(65 + (activeCol ?? 0));
+      return `${colLetter}${(activeRow ?? 0) + 1}`;
+    }
+    const startCol = Math.min(selection.anchor.col, selection.focus.col);
+    const endCol = Math.max(selection.anchor.col, selection.focus.col);
+    const startRow = Math.min(selection.anchor.row, selection.focus.row);
+    const endRow = Math.max(selection.anchor.row, selection.focus.row);
+    const startLetter = String.fromCharCode(65 + startCol);
+    const endLetter = String.fromCharCode(65 + endCol);
+    if (startCol === endCol && startRow === endRow) {
+      return `${startLetter}${startRow + 1}`;
+    }
+    return `${startLetter}${startRow + 1}:${endLetter}${endRow + 1}`;
+  };
+
+  const handleQuickConditionalFormat = (
+    operator: ConditionOperator,
+    values: string[],
+    style: ConditionalFormatStyle
+  ) => {
+    const range = getSelectionRange();
+    onAddConditionalFormat(
+      createConditionalFormatRule({
+        range,
+        operator,
+        values,
+        style,
+      })
+    );
+  };
 
   return (
     <div className="h-14 bg-brand-700 text-white flex items-center px-4 justify-between shadow-lg select-none">
@@ -159,6 +222,120 @@ export function Toolbar({
               <EyeOff size={14} />
             </button>
           </div>
+        </div>
+
+        <div className="h-6 w-px bg-brand-500 mx-1" />
+
+        <div className="flex items-center gap-1">
+          <div className="relative group">
+            <button
+              className="p-2 rounded hover:bg-brand-600 transition-colors flex items-center gap-1"
+              title="条件格式"
+            >
+              <Paintbrush size={16} />
+              <span className="text-xs">条件格式</span>
+            </button>
+            <div className="absolute top-full left-0 mt-1 bg-white text-gray-800 rounded-lg shadow-xl p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 w-56">
+              <p className="text-xs text-gray-500 mb-2 font-medium">快速规则 (应用于选中区域)</p>
+              <button
+                onClick={() =>
+                  handleQuickConditionalFormat('greaterThan', ['0'], {
+                    backgroundColor: '#dcfce7',
+                    textColor: '#166534',
+                  })
+                }
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center gap-2"
+              >
+                <span
+                  className="w-4 h-4 rounded border"
+                  style={{ backgroundColor: '#dcfce7' }}
+                />
+                大于 0 显示绿色
+              </button>
+              <button
+                onClick={() =>
+                  handleQuickConditionalFormat('lessThan', ['0'], {
+                    backgroundColor: '#fee2e2',
+                    textColor: '#991b1b',
+                  })
+                }
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center gap-2"
+              >
+                <span
+                  className="w-4 h-4 rounded border"
+                  style={{ backgroundColor: '#fee2e2' }}
+                />
+                小于 0 显示红色
+              </button>
+              <button
+                onClick={() =>
+                  handleQuickConditionalFormat('equals', [''], {
+                    backgroundColor: '#fef3c7',
+                    textColor: '#92400e',
+                    bold: true,
+                  })
+                }
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center gap-2"
+              >
+                <Bold size={14} className="text-amber-700" />
+                非空单元格加粗
+              </button>
+              <button
+                onClick={() =>
+                  handleQuickConditionalFormat('containsText', ['Error'], {
+                    backgroundColor: '#fecaca',
+                    textColor: '#7f1d1d',
+                    bold: true,
+                  })
+                }
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center gap-2"
+              >
+                <Type size={14} className="text-red-700" />
+                含"Error"高亮警告
+              </button>
+            </div>
+          </div>
+
+          <button
+            onClick={onOpenVersionHistory}
+            className="p-2 rounded hover:bg-brand-600 transition-colors flex items-center gap-1"
+            title="历史版本"
+          >
+            <History size={16} />
+            <span className="text-xs">历史版本</span>
+          </button>
+        </div>
+
+        <div className="h-6 w-px bg-brand-500 mx-1" />
+
+        <div className="flex items-center gap-1">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onImportXlsx(file);
+              e.target.value = '';
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2 rounded hover:bg-brand-600 transition-colors flex items-center gap-1"
+            title="导入 Excel"
+          >
+            <Upload size={16} />
+            <span className="text-xs">导入</span>
+          </button>
+          <button
+            onClick={onExportXlsx}
+            className="p-2 rounded hover:bg-brand-600 transition-colors flex items-center gap-1"
+            title="导出 Excel"
+          >
+            <Download size={16} />
+            <span className="text-xs">导出</span>
+          </button>
         </div>
       </div>
 

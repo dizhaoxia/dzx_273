@@ -29,6 +29,7 @@ interface SpreadsheetGridProps {
   columns: Y.Array<ColMeta> | null;
   getCellValue: (row: number, col: number) => CellData | undefined;
   setCellValue: (row: number, col: number, value: string) => void;
+  getCellStyle: (row: number, col: number) => CellData['format'];
   onCursorChange: (row: number, col: number) => void;
   onSelectionChange: (anchor: { row: number; col: number }, focus: { row: number; col: number }) => void;
   remoteStates: Map<number, RemoteAwarenessMapEntry>;
@@ -45,6 +46,7 @@ export function SpreadsheetGrid({
   columns,
   getCellValue,
   setCellValue,
+  getCellStyle,
   onCursorChange,
   onSelectionChange,
   remoteStates,
@@ -354,18 +356,27 @@ export function SpreadsheetGrid({
         currentX = getXForCol(c);
 
         const cellData = getCellValue(r, c);
-        const displayValue = cellData ? formatValue(cellData.value, cellData.type) : '';
+        const cellStyle = getCellStyle(r, c);
+        const displayValue = cellData ? formatValue(cellData.value, cellData.type, cellData) : '';
         const isSelected = isInSelection(r, c);
         const isFocused = selection.focus.row === r && selection.focus.col === c;
         const isEditing = editingCell?.row === r && editingCell?.col === c;
         const isRowSelected = selectedRow === r;
         const isColSelected = selectedCol === c;
 
+        const appliedBg = cellStyle?.backgroundColor || '';
+        const appliedColor = cellStyle?.textColor || '';
+        const appliedBold = cellStyle?.bold || false;
+        const appliedItalic = cellStyle?.italic || false;
+        const appliedFontSize = cellStyle?.fontSize;
+
+        const hasError = cellData?.error && cellData.type === 'formula';
+
         rendered.push(
           <div
             key={`${r}-${c}`}
             className={`absolute border-r border-b border-gray-200 px-2 py-1 overflow-hidden cursor-cell text-sm font-mono transition-colors ${
-              isFocused ? 'ring-2 ring-brand-primary z-10 bg-white' : ''
+              isFocused ? 'ring-2 ring-brand-primary z-10' : ''
             } ${isSelected && !isFocused ? 'bg-brand-secondary/10' : ''} ${
               isRowSelected || isColSelected ? 'bg-brand-secondary/5' : ''
             }`}
@@ -375,11 +386,17 @@ export function SpreadsheetGrid({
               width: colWidth,
               height: rowHeight,
               lineHeight: `${rowHeight - 8}px`,
+              backgroundColor: isFocused ? '#ffffff' : appliedBg || undefined,
+              color: appliedColor || (hasError ? '#dc2626' : undefined),
+              fontWeight: appliedBold ? 'bold' : undefined,
+              fontStyle: appliedItalic ? 'italic' : undefined,
+              fontSize: appliedFontSize ? `${appliedFontSize}px` : undefined,
             }}
             onClick={(e) => handleCellClick(r, c, e)}
             onDoubleClick={() => handleCellDoubleClick(r, c)}
             onMouseDown={() => handleMouseDown(r, c)}
             onMouseEnter={() => handleMouseEnter(r, c)}
+            title={hasError ? cellData?.error : undefined}
           >
             {isEditing ? (
               <CellEditor
@@ -391,7 +408,13 @@ export function SpreadsheetGrid({
                 height={rowHeight}
               />
             ) : (
-              <span className="truncate block select-none">{displayValue || '\u00A0'}</span>
+              <span
+                className={`truncate block select-none ${
+                  hasError ? 'underline decoration-red-500 decoration-wavy decoration-1 underline-offset-2' : ''
+                }`}
+              >
+                {displayValue || '\u00A0'}
+              </span>
             )}
           </div>
         );

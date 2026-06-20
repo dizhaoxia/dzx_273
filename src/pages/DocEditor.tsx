@@ -5,12 +5,14 @@ import Toolbar from '../components/Toolbar';
 import SpreadsheetGrid from '../components/SpreadsheetGrid';
 import StatusBar from '../components/StatusBar';
 import ToastContainer from '../components/ToastContainer';
+import { VersionHistoryDialog } from '../components/VersionHistoryDialog';
 import type { CollabUser, Selection } from '../types';
 
 export function DocEditor() {
   const { docId } = useParams<{ docId: string }>();
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const [selectedCol, setSelectedCol] = useState<number | null>(null);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
   const [, setTick] = useState(0);
 
   const selectionRef = useRef<Selection | null>({
@@ -49,11 +51,16 @@ export function DocEditor() {
         e.preventDefault();
         collab.redo();
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        collab.createSnapshot('手动保存');
+        collab.addToast({ type: 'success', message: '已创建版本快照' });
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [collab.undo, collab.redo]);
+  }, [collab.undo, collab.redo, collab.createSnapshot, collab.addToast]);
 
   const handleInsertRowAbove = (index: number) => {
     collab.insertRow(index);
@@ -97,6 +104,24 @@ export function DocEditor() {
         onInsertColRight={handleInsertColRight}
         onDeleteCol={collab.deleteColumn}
         onToggleColHidden={collab.toggleColumnHidden}
+        onAddConditionalFormat={collab.addConditionalFormatRule}
+        onOpenVersionHistory={() => setVersionHistoryOpen(true)}
+        onImportXlsx={(file) => {
+          collab
+            .importXlsxFile(file)
+            .then(() => collab.addToast({ type: 'success', message: 'Excel 文件导入成功' }))
+            .catch((err) =>
+              collab.addToast({ type: 'error', message: `导入失败: ${err.message}` })
+            );
+        }}
+        onExportXlsx={() => {
+          collab
+            .exportXlsxFile()
+            .then(() => collab.addToast({ type: 'success', message: 'Excel 文件导出成功' }))
+            .catch((err) =>
+              collab.addToast({ type: 'error', message: `导出失败: ${err.message}` })
+            );
+        }}
       />
 
       <div className="flex-1 overflow-hidden relative">
@@ -107,6 +132,7 @@ export function DocEditor() {
             columns={collab.columns}
             getCellValue={collab.getCellValue}
             setCellValue={collab.setCellValue}
+            getCellStyle={collab.getCellStyle}
             onCursorChange={(r, c) => {
               activeCellRef.current = { row: r, col: c };
               collab.updateCursor(r, c);
@@ -144,6 +170,21 @@ export function DocEditor() {
         lastSyncTime={collab.lastSyncTime}
         collaboratorCount={allUsers.length}
       />
+
+      {collab.cells && collab.rows && collab.columns && collab.versionStore && (
+        <VersionHistoryDialog
+          isOpen={versionHistoryOpen}
+          onClose={() => setVersionHistoryOpen(false)}
+          snapshots={collab.getSnapshots()}
+          versionStore={collab.versionStore}
+          cells={collab.cells}
+          rows={collab.rows}
+          columns={collab.columns}
+          conditionalFormats={collab.conditionalFormats}
+          onRestore={collab.restoreSnapshot}
+          addToast={collab.addToast}
+        />
+      )}
 
       <ToastContainer toasts={collab.toasts} setToasts={collab.setToasts} />
     </div>

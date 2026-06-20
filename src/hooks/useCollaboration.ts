@@ -12,10 +12,25 @@ import type {
   CollabSelection,
   ConnectionStatus,
   Toast,
+  ConditionalFormatRule,
+  VersionSnapshot,
+  DependencyGraph,
 } from '../types';
 import { getCellKey } from '../utils/colIndex';
 import { getColorForId, getRandomName } from '../utils/colors';
 import { detectType, parseValue } from '../utils/cellTypes';
+import {
+  createDependencyGraph,
+  updateCellDependencies,
+  removeCellDependencies,
+  getAffectedCells,
+  topologicalSort,
+  extractDependenciesFromFormula,
+  parseCellKey,
+} from '../utils/formulaParser';
+import { evaluateFormula, detectFormulaType } from '../utils/formulaEngine';
+import { getAppliedStyles, mergeStyles, getAllConditionedCells, createConditionalFormatRule } from '../utils/conditionalFormat';
+import { VersionHistoryStore } from '../utils/versionHistory';
 
 const DEFAULT_ROW_COUNT = 100;
 const DEFAULT_COL_COUNT = 26;
@@ -40,6 +55,8 @@ export interface UseCollaborationResult {
   remoteStates: Map<number, RemoteAwarenessMapEntry>;
   setCellValue: (row: number, col: number, rawValue: string) => void;
   getCellValue: (row: number, col: number) => CellData | undefined;
+  getComputedCellValue: (row: number, col: number) => CellData | undefined;
+  getCellStyle: (row: number, col: number) => CellData['format'];
   insertRow: (index: number) => void;
   deleteRow: (index: number) => void;
   toggleRowHidden: (index: number) => void;
@@ -58,6 +75,18 @@ export interface UseCollaborationResult {
   toasts: Toast[];
   setToasts: React.Dispatch<React.SetStateAction<Toast[]>>;
   documentName: string;
+  conditionalFormats: ConditionalFormatRule[];
+  setConditionalFormats: React.Dispatch<React.SetStateAction<ConditionalFormatRule[]>>;
+  addConditionalFormatRule: (rule: Omit<ConditionalFormatRule, 'id' | 'priority' | 'enabled'>) => void;
+  removeConditionalFormatRule: (ruleId: string) => void;
+  createSnapshot: (label?: string) => void;
+  restoreSnapshot: (checkpointId: string) => void;
+  getSnapshots: () => VersionSnapshot[];
+  versionStore: VersionHistoryStore | null;
+  importXlsxFile: (file: File) => Promise<void>;
+  exportXlsxFile: () => Promise<void>;
+  dependencyGraph: DependencyGraph | null;
+  getAffectedCellKeys: (changedKey: string) => string[];
 }
 
 export function useCollaboration(docId: string): UseCollaborationResult {
@@ -65,13 +94,14 @@ export function useCollaboration(docId: string): UseCollaborationResult {
   const providerRef = useRef<WebsocketProvider | null>(null);
   const undoManagerRef = useRef<Y.UndoManager | null>(null);
   const persistenceRef = useRef<IndexeddbPersistence | null>(null);
+  const depGraphRef = useRef<DependencyGraph>(createDependencyGraph());
+  const versionStoreRef = useRef<VersionHistoryStore>(new VersionHistoryStore());
 
   const [cells, setCells] = useState<Y.Map<CellData> | null>(null);
   const [rows, setRows] = useState<Y.Array<RowMeta> | null>(null);
   const [columns, setColumns] = useState<Y.Array<ColMeta> | null>(null);
-  const [remoteStates, setRemoteStates] = useState<Map<number, RemoteAwarenessMapEntry>>(
-    new Map()
-  );
+  const [conditionalFormats, setConditionalFormats] = useState<ConditionalFormatRule[]>([]);
+  const [remoteStates, setRemoteStates] = useState<Map<number, RemoteAwarenessMapEntry>>(new Map());
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [localUser, setLocalUser] = useState<CollabUser | null>(null);
@@ -83,6 +113,9 @@ export function useCollaboration(docId: string): UseCollaborationResult {
   const localUserRef = useRef<CollabUser | null>(null);
   localUserRef.current = localUser;
 
+  const conditionalFormatsRef = useRef<ConditionalFormatRule[]>([]);
+  conditionalFormatsRef.current = conditionalFormats;
+
   const addToast = useCallback((toast: Omit<Toast, 'id'>) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setToasts((prev) => [...prev, { ...toast, id }]);
@@ -90,6 +123,61 @@ export function useCollaboration(docId: string): UseCollaborationResult {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 3000);
   }, []);
+
+  const getCellValueInternal = useCallback(
+    (row: number, col: number): CellData | undefined => {
+      if (!cells) return undefined;
+      return cells.get(getCellKey(row, col));
+    },
+    [cells]
+  );
+
+  const recalcDependents = useCallback(
+    (changedCellKey: string) => {
+      if (!cells || !ydocRef.current) return;
+
+      const affected = getAffectedCells(depGraphRef.current, changedCellKey);
+      if (affected.length === 0) return;
+
+      const { order, hasCycle, cyclePath } = topologicalSort(depGraphRef.current, [changedCellKey]);
+
+      if (hasCycle && cyclePath.length > 0) {
+        addToast({
+          type: 'warning',
+          message: `检测到循环依赖: ${cyclePath.map((k) => {
+            const { row, col } = parseCellKey(k);
+            return `${String.fromCharCode(65 + col)}${row + 1}`;
+          }).join(' → ')}`,
+        });
+        cyclePath.forEach((k) => {
+          const cell = cells.get(k);
+          if (cell) {
+            cells.set(k, { ...cell, value: '#CIRCULAR!', error: 'Circular dependency detected' });
+          }
+        });
+        return;
+      }
+
+      const calcOrder = order.filter((k) => k !== changedCellKey);
+
+      ydocRef.current.transact(() => {
+        calcOrder.forEach((key) => {
+          const cell = cells.get(key);
+          if (cell && cell.type === 'formula' && cell.formula) {
+            const result = evaluateFormula(cell.formula, (r, c) => cells.get(getCellKey(r, c)));
+            cells.set(key, {
+              ...cell,
+              value: result.value,
+              error: result.error,
+              updatedAt: Date.now(),
+              updatedBy: localUserRef.current?.id || cell.updatedBy,
+            });
+          }
+        });
+      }, 'user');
+    },
+    [cells, addToast]
+  );
 
   const initDocStructure = useCallback((doc: Y.Doc) => {
     const yCells = doc.getMap<CellData>('cells');
@@ -111,6 +199,13 @@ export function useCollaboration(docId: string): UseCollaborationResult {
       }
       yColumns.insert(0, initialCols);
     }
+
+    yCells.forEach((cell, key) => {
+      if (cell.type === 'formula' && cell.formula) {
+        const deps = extractDependenciesFromFormula(cell.formula);
+        updateCellDependencies(depGraphRef.current, key, deps);
+      }
+    });
 
     setCells(yCells);
     setRows(yRows);
@@ -159,6 +254,8 @@ export function useCollaboration(docId: string): UseCollaborationResult {
 
     const ydoc = new Y.Doc();
     ydocRef.current = ydoc;
+    depGraphRef.current = createDependencyGraph();
+    versionStoreRef.current = new VersionHistoryStore();
     initDocStructure(ydoc);
 
     const persistence = new IndexeddbPersistence(docId, ydoc);
@@ -269,34 +366,96 @@ export function useCollaboration(docId: string): UseCollaborationResult {
       if (!cells || !ydocRef.current || !localUserRef.current) return;
 
       const key = getCellKey(row, col);
+      const prevCell = cells.get(key);
+      const isFormula = detectFormulaType(rawValue);
       const type = detectType(rawValue);
-      const value = parseValue(rawValue);
+      const rawParsed = parseValue(rawValue);
+
+      let value: string | number | boolean | null = rawParsed;
+      let error: string | undefined;
+
+      if (isFormula) {
+        const deps = extractDependenciesFromFormula(rawValue);
+        updateCellDependencies(depGraphRef.current, key, deps);
+
+        const result = evaluateFormula(rawValue, (r, c) => cells.get(getCellKey(r, c)));
+        value = result.value;
+        error = result.error;
+      } else {
+        removeCellDependencies(depGraphRef.current, key);
+      }
+
+      versionStoreRef.current.logOperation({
+        type: 'setCell',
+        userId: localUserRef.current.id,
+        userName: localUserRef.current.name,
+        payload: { row, col, rawValue },
+        cellKey: key,
+        prevValue: prevCell?.value,
+        newValue: value,
+      });
 
       ydocRef.current.transact(() => {
         cells.set(key, {
           value,
           type,
+          formula: isFormula ? rawValue : undefined,
+          format: prevCell?.format,
           updatedBy: localUserRef.current.id,
           updatedAt: Date.now(),
+          error,
         });
       }, 'user');
 
+      recalcDependents(key);
+
+      if (cells && rows && columns) {
+        versionStoreRef.current.maybeCreateCheckpoint(
+          cells,
+          rows,
+          columns,
+          conditionalFormatsRef.current,
+          localUserRef.current.id
+        );
+      }
+
       setLastSyncTime(Date.now());
     },
-    [cells]
+    [cells, rows, columns, recalcDependents]
   );
 
   const getCellValue = useCallback(
     (row: number, col: number): CellData | undefined => {
-      if (!cells) return undefined;
-      return cells.get(getCellKey(row, col));
+      return getCellValueInternal(row, col);
     },
-    [cells]
+    [getCellValueInternal]
+  );
+
+  const getComputedCellValue = useCallback(
+    (row: number, col: number): CellData | undefined => {
+      return getCellValueInternal(row, col);
+    },
+    [getCellValueInternal]
+  );
+
+  const getCellStyle = useCallback(
+    (row: number, col: number): CellData['format'] => {
+      const cell = getCellValueInternal(row, col);
+      const applied = getAppliedStyles(conditionalFormatsRef.current, row, col, (r, c) => getCellValueInternal(r, c));
+      return mergeStyles(cell?.format, applied);
+    },
+    [getCellValueInternal]
   );
 
   const insertRow = useCallback(
     (index: number) => {
-      if (!rows || !ydocRef.current) return;
+      if (!rows || !ydocRef.current || !localUserRef.current) return;
+      versionStoreRef.current.logOperation({
+        type: 'insertRow',
+        userId: localUserRef.current.id,
+        userName: localUserRef.current.name,
+        payload: { index },
+      });
       ydocRef.current.transact(() => {
         rows.insert(index, [{ index, height: DEFAULT_ROW_HEIGHT, hidden: false }]);
         for (let i = index + 1; i < rows.length; i++) {
@@ -311,7 +470,13 @@ export function useCollaboration(docId: string): UseCollaborationResult {
 
   const deleteRow = useCallback(
     (index: number) => {
-      if (!rows || !ydocRef.current) return;
+      if (!rows || !ydocRef.current || !localUserRef.current) return;
+      versionStoreRef.current.logOperation({
+        type: 'deleteRow',
+        userId: localUserRef.current.id,
+        userName: localUserRef.current.name,
+        payload: { index },
+      });
       ydocRef.current.transact(() => {
         rows.delete(index);
         for (let i = index; i < rows.length; i++) {
@@ -338,7 +503,13 @@ export function useCollaboration(docId: string): UseCollaborationResult {
 
   const insertColumn = useCallback(
     (index: number) => {
-      if (!columns || !ydocRef.current) return;
+      if (!columns || !ydocRef.current || !localUserRef.current) return;
+      versionStoreRef.current.logOperation({
+        type: 'insertCol',
+        userId: localUserRef.current.id,
+        userName: localUserRef.current.name,
+        payload: { index },
+      });
       ydocRef.current.transact(() => {
         columns.insert(index, [{ index, width: DEFAULT_COL_WIDTH, hidden: false }]);
         for (let i = index + 1; i < columns.length; i++) {
@@ -353,7 +524,13 @@ export function useCollaboration(docId: string): UseCollaborationResult {
 
   const deleteColumn = useCallback(
     (index: number) => {
-      if (!columns || !ydocRef.current) return;
+      if (!columns || !ydocRef.current || !localUserRef.current) return;
+      versionStoreRef.current.logOperation({
+        type: 'deleteCol',
+        userId: localUserRef.current.id,
+        userName: localUserRef.current.name,
+        payload: { index },
+      });
       ydocRef.current.transact(() => {
         columns.delete(index);
         for (let i = index; i < columns.length; i++) {
@@ -411,6 +588,120 @@ export function useCollaboration(docId: string): UseCollaborationResult {
     }
   }, []);
 
+  const addConditionalFormatRule = useCallback(
+    (rule: Omit<ConditionalFormatRule, 'id' | 'priority' | 'enabled'>) => {
+      const newRule = createConditionalFormatRule({
+        range: rule.range,
+        operator: rule.condition.operator,
+        style: rule.style,
+        values: rule.condition.values,
+        formula: rule.condition.formula,
+      });
+      newRule.priority = conditionalFormatsRef.current.length;
+      if (rule.stopIfTrue !== undefined) newRule.stopIfTrue = rule.stopIfTrue;
+      setConditionalFormats((prev) => [...prev, newRule]);
+      addToast({ type: 'success', message: '条件格式规则已添加' });
+    },
+    [addToast]
+  );
+
+  const removeConditionalFormatRule = useCallback(
+    (ruleId: string) => {
+      setConditionalFormats((prev) => prev.filter((r) => r.id !== ruleId));
+    },
+    []
+  );
+
+  const createSnapshot = useCallback(
+    (label?: string) => {
+      if (!cells || !rows || !columns || !localUserRef.current) return;
+      versionStoreRef.current.createCheckpoint(
+        cells,
+        rows,
+        columns,
+        conditionalFormatsRef.current,
+        localUserRef.current.id,
+        label
+      );
+      addToast({ type: 'success', message: '版本快照已创建' });
+    },
+    [cells, rows, columns, addToast]
+  );
+
+  const restoreSnapshot = useCallback(
+    (checkpointId: string) => {
+      if (!cells || !rows || !columns) return;
+      const result = versionStoreRef.current.restoreCheckpoint(
+        checkpointId,
+        cells,
+        rows,
+        columns,
+        conditionalFormatsRef.current
+      );
+      if (result?.conditionalFormats) {
+        setConditionalFormats(result.conditionalFormats);
+      }
+      depGraphRef.current = createDependencyGraph();
+      cells.forEach((cell, key) => {
+        if (cell.type === 'formula' && cell.formula) {
+          const deps = extractDependenciesFromFormula(cell.formula);
+          updateCellDependencies(depGraphRef.current, key, deps);
+        }
+      });
+    },
+    [cells, rows, columns]
+  );
+
+  const getSnapshots = useCallback((): VersionSnapshot[] => {
+    return versionStoreRef.current.getSnapshots();
+  }, []);
+
+  const importXlsxFile = useCallback(
+    async (file: File) => {
+      if (!cells || !rows || !columns || !localUserRef.current) return;
+      try {
+        const { importFromXlsx, applyParsedDataToYjs } = await import('../utils/xlsxIO');
+        const parsed = await importFromXlsx(file);
+        ydocRef.current?.transact(() => {
+          applyParsedDataToYjs(parsed, cells, rows, columns, localUserRef.current!.id);
+        }, 'user');
+        cells.forEach((cell, key) => {
+          if (cell.type === 'formula' && cell.formula) {
+            const deps = extractDependenciesFromFormula(cell.formula);
+            updateCellDependencies(depGraphRef.current, key, deps);
+          }
+        });
+        addToast({ type: 'success', message: `成功导入 ${parsed.cells.length} 个单元格` });
+      } catch (e) {
+        addToast({ type: 'error', message: `导入失败: ${(e as Error).message}` });
+      }
+    },
+    [cells, rows, columns, addToast]
+  );
+
+  const exportXlsxFile = useCallback(async () => {
+    if (!cells || !rows || !columns) return;
+    try {
+      const { exportToXlsx } = await import('../utils/xlsxIO');
+      const blob = await exportToXlsx(cells, rows, columns);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${documentName || 'spreadsheet'}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      addToast({ type: 'success', message: '导出成功' });
+    } catch (e) {
+      addToast({ type: 'error', message: `导出失败: ${(e as Error).message}` });
+    }
+  }, [cells, rows, columns, documentName, addToast]);
+
+  const getAffectedCellKeys = useCallback((changedKey: string): string[] => {
+    return getAffectedCells(depGraphRef.current, changedKey);
+  }, []);
+
   return {
     ydoc: ydocRef.current,
     cells,
@@ -422,6 +713,8 @@ export function useCollaboration(docId: string): UseCollaborationResult {
     remoteStates,
     setCellValue,
     getCellValue,
+    getComputedCellValue,
+    getCellStyle,
     insertRow,
     deleteRow,
     toggleRowHidden,
@@ -440,6 +733,18 @@ export function useCollaboration(docId: string): UseCollaborationResult {
     toasts,
     setToasts,
     documentName,
+    conditionalFormats,
+    setConditionalFormats,
+    addConditionalFormatRule,
+    removeConditionalFormatRule,
+    createSnapshot,
+    restoreSnapshot,
+    getSnapshots,
+    versionStore: versionStoreRef.current,
+    importXlsxFile,
+    exportXlsxFile,
+    dependencyGraph: depGraphRef.current,
+    getAffectedCellKeys,
   };
 }
 
