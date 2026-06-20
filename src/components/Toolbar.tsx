@@ -1,5 +1,5 @@
-import { Undo2, Redo2, Plus, Trash2, Eye, EyeOff, Table2, Share2 } from 'lucide-react';
-import type { CollabUser } from '../types';
+import { Undo2, Redo2, Plus, Trash2, Eye, EyeOff, Table2, Share2, ArrowUpFromLine, ArrowDownFromLine, ArrowLeftFromLine, ArrowRightFromLine } from 'lucide-react';
+import type { CollabUser, Selection } from '../types';
 import UserAvatarList from './UserAvatarList';
 
 interface ToolbarProps {
@@ -7,14 +7,17 @@ interface ToolbarProps {
   users: CollabUser[];
   canUndo: boolean;
   canRedo: boolean;
+  selection: Selection | null;
   selectedCol: number | null;
   selectedRow: number | null;
   onUndo: () => void;
   onRedo: () => void;
-  onInsertRow: (index: number) => void;
+  onInsertRowAbove: (index: number) => void;
+  onInsertRowBelow: (index: number) => void;
   onDeleteRow: (index: number) => void;
   onToggleRowHidden: (index: number) => void;
-  onInsertCol: (index: number) => void;
+  onInsertColLeft: (index: number) => void;
+  onInsertColRight: (index: number) => void;
   onDeleteCol: (index: number) => void;
   onToggleColHidden: (index: number) => void;
 }
@@ -24,20 +27,28 @@ export function Toolbar({
   users,
   canUndo,
   canRedo,
+  selection,
   selectedCol,
   selectedRow,
   onUndo,
   onRedo,
-  onInsertRow,
+  onInsertRowAbove,
+  onInsertRowBelow,
   onDeleteRow,
   onToggleRowHidden,
-  onInsertCol,
+  onInsertColLeft,
+  onInsertColRight,
   onDeleteCol,
   onToggleColHidden,
 }: ToolbarProps) {
+  const activeRow = selectedRow ?? selection?.focus.row ?? null;
+  const activeCol = selectedCol ?? selection?.focus.col ?? null;
+  const hasRowSelection = activeRow !== null;
+  const hasColSelection = activeCol !== null;
+
   return (
     <div className="h-14 bg-brand-700 text-white flex items-center px-4 justify-between shadow-lg select-none">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <Table2 size={24} className="text-brand-200" />
           <span className="font-display font-semibold text-lg tracking-wide">
@@ -45,7 +56,7 @@ export function Toolbar({
           </span>
         </div>
 
-        <div className="h-6 w-px bg-brand-500 mx-2" />
+        <div className="h-6 w-px bg-brand-500 mx-1" />
 
         <div className="flex items-center gap-1">
           <button
@@ -66,61 +77,87 @@ export function Toolbar({
           </button>
         </div>
 
-        <div className="h-6 w-px bg-brand-500 mx-2" />
+        <div className="h-6 w-px bg-brand-500 mx-1" />
 
-        {selectedRow !== null && (
+        <div className="flex items-center gap-1">
           <div className="flex items-center gap-1 bg-brand-800 rounded px-2 py-1">
-            <span className="text-xs text-brand-200 mr-2">行 {selectedRow + 1}</span>
+            <span className="text-xs text-brand-200 mr-1">行</span>
             <button
-              onClick={() => onInsertRow(selectedRow)}
-              className="p-1.5 rounded hover:bg-brand-600 transition-colors"
-              title="在上方插入行"
+              onClick={() => hasRowSelection && onInsertRowAbove(activeRow!)}
+              disabled={!hasRowSelection}
+              className="p-1.5 rounded hover:bg-brand-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center gap-0.5"
+              title={hasRowSelection ? `在第 ${activeRow! + 1} 行上方插入行` : '请先选择单元格或行号'}
             >
-              <Plus size={14} />
+              <ArrowUpFromLine size={13} />
+              <Plus size={12} />
             </button>
             <button
-              onClick={() => onDeleteRow(selectedRow)}
-              className="p-1.5 rounded hover:bg-red-600 transition-colors"
-              title="删除行"
+              onClick={() => hasRowSelection && onInsertRowBelow(activeRow!)}
+              disabled={!hasRowSelection}
+              className="p-1.5 rounded hover:bg-brand-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center gap-0.5"
+              title={hasRowSelection ? `在第 ${activeRow! + 1} 行下方插入行` : '请先选择单元格或行号'}
+            >
+              <ArrowDownFromLine size={13} />
+              <Plus size={12} />
+            </button>
+            <button
+              onClick={() => hasRowSelection && onDeleteRow(activeRow!)}
+              disabled={!hasRowSelection}
+              className="p-1.5 rounded hover:bg-red-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title={hasRowSelection ? `删除第 ${activeRow! + 1} 行` : '请先选择单元格或行号'}
             >
               <Trash2 size={14} />
             </button>
             <button
-              onClick={() => onToggleRowHidden(selectedRow)}
-              className="p-1.5 rounded hover:bg-brand-600 transition-colors"
-              title="切换行显示/隐藏"
+              onClick={() => hasRowSelection && onToggleRowHidden(activeRow!)}
+              disabled={!hasRowSelection}
+              className="p-1.5 rounded hover:bg-brand-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title={hasRowSelection ? `隐藏/显示第 ${activeRow! + 1} 行` : '请先选择单元格或行号'}
             >
               <Eye size={14} />
             </button>
           </div>
-        )}
+        </div>
 
-        {selectedCol !== null && (
+        <div className="flex items-center gap-1">
           <div className="flex items-center gap-1 bg-brand-800 rounded px-2 py-1">
-            <span className="text-xs text-brand-200 mr-2">列 {String.fromCharCode(65 + selectedCol)}</span>
+            <span className="text-xs text-brand-200 mr-1">列</span>
             <button
-              onClick={() => onInsertCol(selectedCol)}
-              className="p-1.5 rounded hover:bg-brand-600 transition-colors"
-              title="在左侧插入列"
+              onClick={() => hasColSelection && onInsertColLeft(activeCol!)}
+              disabled={!hasColSelection}
+              className="p-1.5 rounded hover:bg-brand-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center gap-0.5"
+              title={hasColSelection ? `在 ${String.fromCharCode(65 + activeCol!)} 列左侧插入列` : '请先选择单元格或列标题'}
             >
-              <Plus size={14} />
+              <ArrowLeftFromLine size={13} />
+              <Plus size={12} />
             </button>
             <button
-              onClick={() => onDeleteCol(selectedCol)}
-              className="p-1.5 rounded hover:bg-red-600 transition-colors"
-              title="删除列"
+              onClick={() => hasColSelection && onInsertColRight(activeCol!)}
+              disabled={!hasColSelection}
+              className="p-1.5 rounded hover:bg-brand-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center gap-0.5"
+              title={hasColSelection ? `在 ${String.fromCharCode(65 + activeCol!)} 列右侧插入列` : '请先选择单元格或列标题'}
+            >
+              <ArrowRightFromLine size={13} />
+              <Plus size={12} />
+            </button>
+            <button
+              onClick={() => hasColSelection && onDeleteCol(activeCol!)}
+              disabled={!hasColSelection}
+              className="p-1.5 rounded hover:bg-red-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title={hasColSelection ? `删除 ${String.fromCharCode(65 + activeCol!)} 列` : '请先选择单元格或列标题'}
             >
               <Trash2 size={14} />
             </button>
             <button
-              onClick={() => onToggleColHidden(selectedCol)}
-              className="p-1.5 rounded hover:bg-brand-600 transition-colors"
-              title="切换列显示/隐藏"
+              onClick={() => hasColSelection && onToggleColHidden(activeCol!)}
+              disabled={!hasColSelection}
+              className="p-1.5 rounded hover:bg-brand-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title={hasColSelection ? `隐藏/显示 ${String.fromCharCode(65 + activeCol!)} 列` : '请先选择单元格或列标题'}
             >
               <EyeOff size={14} />
             </button>
           </div>
-        )}
+        </div>
       </div>
 
       <div className="flex items-center gap-4">

@@ -1,16 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import useCollaboration from '../hooks/useCollaboration';
 import Toolbar from '../components/Toolbar';
 import SpreadsheetGrid from '../components/SpreadsheetGrid';
 import StatusBar from '../components/StatusBar';
 import ToastContainer from '../components/ToastContainer';
-import type { CollabUser } from '../types';
+import type { CollabUser, Selection } from '../types';
 
 export function DocEditor() {
   const { docId } = useParams<{ docId: string }>();
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const [selectedCol, setSelectedCol] = useState<number | null>(null);
+  const [, setTick] = useState(0);
+
+  const selectionRef = useRef<Selection | null>({
+    anchor: { row: 0, col: 0 },
+    focus: { row: 0, col: 0 },
+  });
+  const selectedRowRef = useRef<number | null>(null);
+  const selectedColRef = useRef<number | null>(null);
 
   const collab = useCollaboration(docId || '');
 
@@ -23,6 +31,8 @@ export function DocEditor() {
       allUsers.push(state.user);
     }
   });
+
+  const refreshToolbar = () => setTick((t) => t + 1);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -44,6 +54,19 @@ export function DocEditor() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [collab.undo, collab.redo]);
 
+  const handleInsertRowAbove = (index: number) => {
+    collab.insertRow(index);
+  };
+  const handleInsertRowBelow = (index: number) => {
+    collab.insertRow(index + 1);
+  };
+  const handleInsertColLeft = (index: number) => {
+    collab.insertColumn(index);
+  };
+  const handleInsertColRight = (index: number) => {
+    collab.insertColumn(index + 1);
+  };
+
   if (!docId) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -59,14 +82,17 @@ export function DocEditor() {
         users={allUsers}
         canUndo={collab.canUndo}
         canRedo={collab.canRedo}
-        selectedRow={selectedRow}
-        selectedCol={selectedCol}
+        selection={selectionRef.current}
+        selectedRow={selectedRowRef.current}
+        selectedCol={selectedColRef.current}
         onUndo={collab.undo}
         onRedo={collab.redo}
-        onInsertRow={collab.insertRow}
+        onInsertRowAbove={handleInsertRowAbove}
+        onInsertRowBelow={handleInsertRowBelow}
         onDeleteRow={collab.deleteRow}
         onToggleRowHidden={collab.toggleRowHidden}
-        onInsertCol={collab.insertColumn}
+        onInsertColLeft={handleInsertColLeft}
+        onInsertColRight={handleInsertColRight}
         onDeleteCol={collab.deleteColumn}
         onToggleColHidden={collab.toggleColumnHidden}
       />
@@ -79,11 +105,26 @@ export function DocEditor() {
             columns={collab.columns}
             getCellValue={collab.getCellValue}
             setCellValue={collab.setCellValue}
-            onCursorChange={collab.updateCursor}
-            onSelectionChange={collab.updateSelection}
+            onCursorChange={(r, c) => {
+              collab.updateCursor(r, c);
+              refreshToolbar();
+            }}
+            onSelectionChange={(anchor, focus) => {
+              collab.updateSelection(anchor, focus);
+              refreshToolbar();
+            }}
             remoteStates={collab.remoteStates}
-            onSelectRow={setSelectedRow}
-            onSelectCol={setSelectedCol}
+            onSelectRow={(r) => {
+              setSelectedRow(r);
+              refreshToolbar();
+            }}
+            onSelectCol={(c) => {
+              setSelectedCol(c);
+              refreshToolbar();
+            }}
+            selectionRef={selectionRef}
+            selectedRowRef={selectedRowRef}
+            selectedColRef={selectedColRef}
           />
         ) : (
           <div className="flex items-center justify-center h-full">

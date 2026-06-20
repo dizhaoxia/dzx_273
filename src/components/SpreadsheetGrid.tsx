@@ -34,6 +34,9 @@ interface SpreadsheetGridProps {
   remoteStates: Map<number, RemoteAwarenessMapEntry>;
   onSelectRow: (row: number | null) => void;
   onSelectCol: (col: number | null) => void;
+  selectionRef: React.MutableRefObject<Selection | null>;
+  selectedRowRef: React.MutableRefObject<number | null>;
+  selectedColRef: React.MutableRefObject<number | null>;
 }
 
 export function SpreadsheetGrid({
@@ -47,6 +50,9 @@ export function SpreadsheetGrid({
   remoteStates,
   onSelectRow,
   onSelectCol,
+  selectionRef,
+  selectedRowRef,
+  selectedColRef,
 }: SpreadsheetGridProps) {
   const [selection, setSelection] = useState<Selection>({
     anchor: { row: 0, col: 0 },
@@ -58,6 +64,18 @@ export function SpreadsheetGrid({
   const [selectedCol, setSelectedCol] = useState<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection, selectionRef]);
+
+  useEffect(() => {
+    selectedRowRef.current = selectedRow;
+  }, [selectedRow, selectedRowRef]);
+
+  useEffect(() => {
+    selectedColRef.current = selectedCol;
+  }, [selectedCol, selectedColRef]);
 
   const [, forceUpdate] = useState(0);
 
@@ -243,6 +261,11 @@ export function SpreadsheetGrid({
     }
   };
 
+  const handleEditPartialSync = (value: string) => {
+    if (!editingCell) return;
+    setCellValue(editingCell.row, editingCell.col, value);
+  };
+
   const handleEditCommit = (value: string, moveToNext: 'down' | 'right' | null) => {
     setCellValue(editingCell!.row, editingCell!.col, value);
 
@@ -336,6 +359,7 @@ export function SpreadsheetGrid({
               <CellEditor
                 initialValue={editingCell?.initialValue || displayValue}
                 onCommit={handleEditCommit}
+                onPartialSync={handleEditPartialSync}
                 onCancel={() => setEditingCell(null)}
                 width={colWidth}
                 height={rowHeight}
